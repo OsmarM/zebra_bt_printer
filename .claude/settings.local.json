@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"exit:$?\")",
+      "Bash(flutter analyze *)",
+      "Bash(flutter test *)",
+      "Read(//Users/osmarmanrique/Documents - MacBook Air de Osmar/Development/Soriana/Fenicia/**)",
+      "Bash(flutter create *)",
+      "Bash(flutter pub *)"
+    ]
+  }
+}

@@ -1,0 +1,98 @@
+group = "com.soriana.zebra_bt_printer"
+version = "1.0-SNAPSHOT"
+
+buildscript {
+    ext.kotlin_version = "2.2.20"
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.11.1")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    namespace = "com.soriana.zebra_bt_printer"
+
+    compileSdk = 36
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
+    }
+
+    defaultConfig {
+        minSdk = 24
+    }
+
+    packaging {
+        resources {
+            // JARs del SDK de Zebra (httpcore, httpmime, commons-*) incluyen
+            // archivos META-INF y recursos duplicados. Se descartan o se toma
+            // la primera aparición para evitar el fallo de merge.
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+                'META-INF/*.RSA',
+                'META-INF/*.SF',
+                'META-INF/*.DSA',
+            ]
+            // Recursos internos de Apache Commons que aparecen duplicados
+            // al coexistir la versión normal y la versión "jetified" del JAR.
+            pickFirsts += [
+                'org/apache/commons/**',
+                'org/apache/**',
+            ]
+        }
+    }
+
+    dependencies {
+        // Zebra Link-OS SDK (Bluetooth + TCP/IP)
+        implementation fileTree(dir: 'libs', include: ['ZSDK_ANDROID_API.jar',
+            'commons-io-2.18.0.jar', 'commons-lang3-3.17.0.jar',
+            'commons-net-3.11.1.jar', 'commons-validator-1.9.0.jar',
+            'httpcore-4.4.16.jar', 'httpmime-4.5.14.jar'])
+        // Honeywell portable printer SDK
+        implementation fileTree(dir: 'libs', include: ['printer_sdk.jar'])
+
+        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.mockito:mockito-core:5.0.0")
+    }
+
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+
+            testLogging {
+               events "passed", "skipped", "failed", "standardOut", "standardError"
+               outputs.upToDateWhen {false}
+               showStandardStreams = true
+            }
+        }
+    }
+}
