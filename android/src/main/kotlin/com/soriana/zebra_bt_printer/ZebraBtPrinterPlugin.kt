@@ -282,12 +282,15 @@ class ZebraBtPrinterPlugin :
 
         try {
             val bitmap  = decodeBase64ToBitmap(imageBase64)
-            val resized = resizeBitmap(bitmap, config.labelWidthDots, config.labelHeightDots, config.useSmoothScaling)
+            val resized = resizeBitmap(
+                bitmap, config.labelWidthDots, config.labelHeightDots,
+                config.useSmoothScaling, config.allowUpscale,
+            )
 
             val offsetX = maxOf(0, (config.labelWidthDots - resized.width) / 2)
             val offsetY = maxOf(0, (config.labelHeightDots - resized.height) / 2)
 
-            val header = "^XA\n^MNB\n^PW${config.labelWidthDots}\n^LL${config.labelHeightDots}\n^XZ"
+            val header = "^XA\n${config.zplMediaCommand}\n^PW${config.labelWidthDots}\n^LL${config.labelHeightDots}\n^XZ"
             conn.write(header.toByteArray())
 
             val printer    = ZebraPrinterFactory.getInstance(conn)
@@ -304,7 +307,10 @@ class ZebraBtPrinterPlugin :
 
         try {
             val bitmap  = decodeBase64ToBitmap(imageBase64)
-            val resized = resizeBitmap(bitmap, config.labelWidthDots, config.labelHeightDots, config.useSmoothScaling)
+            val resized = resizeBitmap(
+                bitmap, config.labelWidthDots, config.labelHeightDots,
+                config.useSmoothScaling, config.allowUpscale,
+            )
 
             val offsetX = maxOf(0, (config.labelWidthDots - resized.width) / 2)
 
@@ -342,11 +348,13 @@ class ZebraBtPrinterPlugin :
         maxWidth: Int,
         maxHeight: Int,
         smooth: Boolean = true,
+        allowUpscale: Boolean = false,
     ): Bitmap {
+        val scaleLimit = if (allowUpscale) Float.MAX_VALUE else 1f
         val scale = minOf(
             maxWidth.toFloat() / source.width,
             maxHeight.toFloat() / source.height,
-            1f,
+            scaleLimit,
         ).coerceAtLeast(0.1f)
 
         val newW = (source.width * scale).toInt().coerceAtLeast(1)
@@ -411,13 +419,25 @@ class ZebraBtPrinterPlugin :
         val labelHeightDots: Int,
         val useSmoothScaling: Boolean,
         val printerType: String,
+        /** "gap" → ^MNA  |  "mark" → ^MNB  |  "none" → ^MNN */
+        val mediaType: String,
+        val allowUpscale: Boolean,
     ) {
+        /** Comando ZPL correspondiente al tipo de media. */
+        val zplMediaCommand: String get() = when (mediaType) {
+            "mark" -> "^MNB"
+            "none" -> "^MNN"
+            else   -> "^MNA"   // "gap" y cualquier valor desconocido → gap sensing
+        }
+
         companion object {
             fun fromCall(call: MethodCall) = PrintConfig(
                 labelWidthDots   = call.argument<Int>("labelWidthDots")         ?: 600,
-                labelHeightDots  = call.argument<Int>("labelHeightDots")        ?: 250,
+                labelHeightDots  = call.argument<Int>("labelHeightDots")        ?: 240,
                 useSmoothScaling = call.argument<Boolean>("useSmoothScaling")   ?: true,
                 printerType      = call.argument<String>("printerType")         ?: "zebra",
+                mediaType        = call.argument<String>("mediaType")           ?: "gap",
+                allowUpscale     = call.argument<Boolean>("allowUpscale")       ?: false,
             )
         }
     }
