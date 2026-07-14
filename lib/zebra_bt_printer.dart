@@ -80,4 +80,26 @@ class ZebraBtPrinter {
   static Future<bool> isBluetoothEnabled() {
     return ZebraBtPrinterPlatform.instance.isBluetoothEnabled();
   }
+
+  /// Abre una conexión Bluetooth persistente con la impresora [mac].
+  ///
+  /// Úsalo antes de imprimir múltiples etiquetas seguidas para eliminar el
+  /// overhead de conexión (~4-6 s) en cada llamada a [printImageBluetooth].
+  ///
+  /// ```dart
+  /// await ZebraBtPrinter.connectBluetooth(mac: '48:A4:93:DB:04:6F');
+  /// for (final label in labels) {
+  ///   await ZebraBtPrinter.printImageBluetooth(mac: '48:A4:93:DB:04:6F', ...);
+  /// }
+  /// await ZebraBtPrinter.disconnectBluetooth(mac: '48:A4:93:DB:04:6F');
+  /// ```
+  static Future<bool> connectBluetooth({required String mac}) {
+    return ZebraBtPrinterPlatform.instance.connectBluetooth(mac: mac);
+  }
+
+  /// Cierra la conexión Bluetooth persistente con la impresora [mac].
+  /// Llámalo siempre al terminar la sesión de impresión.
+  static Future<bool> disconnectBluetooth({required String mac}) {
+    return ZebraBtPrinterPlatform.instance.disconnectBluetooth(mac: mac);
+  }
 }

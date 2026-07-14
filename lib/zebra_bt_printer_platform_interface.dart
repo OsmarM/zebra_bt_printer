@@ -56,4 +56,18 @@ abstract class ZebraBtPrinterPlatform extends PlatformInterface {
   Future<bool> isBluetoothEnabled() {
     throw UnimplementedError('isBluetoothEnabled() has not been implemented.');
   }
+
+  /// Abre y mantiene una conexión Bluetooth persistente con la impresora [mac].
+  ///
+  /// Llamar a este método antes de imprimir múltiples etiquetas consecutivas
+  /// elimina el overhead de open/close (~4-6 s) por impresión.
+  /// Cuando termines de imprimir llama a [disconnectBluetooth].
+  Future<bool> connectBluetooth({required String mac}) {
+    throw UnimplementedError('connectBluetooth() has not been implemented.');
+  }
+
+  /// Cierra la conexión Bluetooth persistente con la impresora [mac].
+  Future<bool> disconnectBluetooth({required String mac}) {
+    throw UnimplementedError('disconnectBluetooth() has not been implemented.');
+  }
 }

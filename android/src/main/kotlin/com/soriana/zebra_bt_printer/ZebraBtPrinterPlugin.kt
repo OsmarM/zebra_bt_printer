@@ -48,6 +48,11 @@ class ZebraBtPrinterPlugin :
     private val MAX_RETRIES    = 3
     private val RETRY_DELAY_MS = 1500L
 
+    // Conexiones BT persistentes, indexadas por MAC.
+    // Permiten reutilizar la misma sesión SPP entre impresiones consecutivas
+    // eliminando el overhead de open/close (~4-6 s por etiqueta).
+    private val persistentConnections = mutableMapOf<String, BluetoothConnection>()
+
     private val BLUETOOTH_PERMISSIONS_S = arrayOf(
         Manifest.permission.BLUETOOTH_CONNECT,
         Manifest.permission.BLUETOOTH_SCAN,
@@ -70,6 +75,7 @@ class ZebraBtPrinterPlugin :
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         appContext = null
+        closeAllPersistentConnections()
     }
 
     // ─────────────────────────── ActivityAware ───────────────────────────────
@@ -102,6 +108,8 @@ class ZebraBtPrinterPlugin :
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
+            "connectBluetooth"    -> handleConnectBluetooth(call, result)
+            "disconnectBluetooth" -> handleDisconnectBluetooth(call, result)
             "printImageBluetooth" -> handlePrintImageBluetooth(call, result)
             "printImageIP"        -> handlePrintImageIP(call, result)
             "printLabelBluetooth" -> handlePrintLabelBluetooth(call, result)
@@ -112,6 +120,42 @@ class ZebraBtPrinterPlugin :
     }
 
     // ─────────────────────────── Handlers ────────────────────────────────────
+
+    private fun handleConnectBluetooth(call: MethodCall, result: Result) {
+        val mac = call.argument<String>("mac") ?: return result.error("INVALID_ARGS", "mac es requerido", null)
+
+        if (!hasBluetoothPermissions()) {
+            return result.error(
+                "PERMISSION_DENIED",
+                "Faltan permisos Bluetooth. Llama a requestPermissions() primero.",
+                null,
+            )
+        }
+
+        runInBackground {
+            try {
+                getOrOpenConnection(mac)
+                runOnUiThread(result) { it.success(true) }
+            } catch (e: Exception) {
+                runOnUiThread(result) { it.error("CONNECT_ERROR", e.message, null) }
+            }
+        }
+    }
+
+    private fun handleDisconnectBluetooth(call: MethodCall, result: Result) {
+        val mac = call.argument<String>("mac") ?: return result.error("INVALID_ARGS", "mac es requerido", null)
+
+        runInBackground {
+            try {
+                synchronized(persistentConnections) {
+                    persistentConnections.remove(mac)?.let { safeClose(it) }
+                }
+                runOnUiThread(result) { it.success(true) }
+            } catch (e: Exception) {
+                runOnUiThread(result) { it.error("DISCONNECT_ERROR", e.message, null) }
+            }
+        }
+    }
 
     private fun handlePrintImageBluetooth(call: MethodCall, result: Result) {
         val mac         = call.argument<String>("mac")         ?: return result.error("INVALID_ARGS", "mac es requerido", null)
@@ -275,10 +319,14 @@ class ZebraBtPrinterPlugin :
     // ─────────────────────────── Zebra printing ──────────────────────────────
 
     private fun printImageViaBluetooth(mac: String, imageBase64: String, config: PrintConfig) {
-        cancelBluetoothDiscovery()
+        val persistent = synchronized(persistentConnections) { persistentConnections[mac] }
+        val conn       = persistent ?: run {
+            // Sin conexión persistente: abre una conexión temporal para esta impresión.
+            cancelBluetoothDiscovery()
+            BluetoothConnection(mac).also { it.open() }
+        }
 
-        val conn = BluetoothConnection(mac)
-        conn.open()
+        val closeable = persistent == null   // solo cerrar si la abrimos nosotros
 
         try {
             val bitmap  = decodeBase64ToBitmap(imageBase64)
@@ -296,8 +344,16 @@ class ZebraBtPrinterPlugin :
             val printer    = ZebraPrinterFactory.getInstance(conn)
             val zebraImage = ZebraImageAndroid(resized)
             printer.printImage(zebraImage, offsetX, offsetY, resized.width, resized.height, false)
+        } catch (e: Exception) {
+            // Si la conexión persistente falló, la eliminamos del cache para
+            // que la próxima llamada abra una conexión nueva.
+            if (!closeable) {
+                synchronized(persistentConnections) { persistentConnections.remove(mac) }
+                safeClose(conn)
+            }
+            throw e
         } finally {
-            safeClose(conn)
+            if (closeable) safeClose(conn)
         }
     }
 
@@ -371,6 +427,30 @@ class ZebraBtPrinterPlugin :
         }
         canvas.drawBitmap(source, Rect(0, 0, source.width, source.height), Rect(0, 0, newW, newH), paint)
         return out
+    }
+
+    // ─────────────────────────── Persistent connection helpers ───────────────
+
+    /**
+     * Devuelve la conexión existente para [mac] si ya está abierta,
+     * o abre una nueva y la almacena en [persistentConnections].
+     */
+    private fun getOrOpenConnection(mac: String): BluetoothConnection {
+        synchronized(persistentConnections) {
+            persistentConnections[mac]?.let { return it }
+        }
+        cancelBluetoothDiscovery()
+        val conn = BluetoothConnection(mac)
+        conn.open()
+        synchronized(persistentConnections) { persistentConnections[mac] = conn }
+        return conn
+    }
+
+    private fun closeAllPersistentConnections() {
+        synchronized(persistentConnections) {
+            persistentConnections.values.forEach { safeClose(it) }
+            persistentConnections.clear()
+        }
     }
 
     // ─────────────────────────── Helpers ─────────────────────────────────────
