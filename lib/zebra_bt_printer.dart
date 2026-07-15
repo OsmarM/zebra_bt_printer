@@ -26,16 +26,22 @@ class ZebraBtPrinter {
   ///
   /// [mac] : Dirección MAC de la impresora (ej. `48:A4:93:DB:04:6F`).
   /// [imageBase64] : Imagen en formato base64 (JPG o PNG).
-  /// [config] : Configuración de etiqueta. Por defecto 600×250 dots, Zebra.
+  /// [config] : Configuración de etiqueta. Por defecto 600×240 dots, Zebra.
+  /// [copies] : Número de copias a imprimir en una sola conexión BT (default 1).
+  ///
+  /// Pasar [copies] > 1 es mucho más eficiente que llamar este método
+  /// varias veces, ya que la conexión Bluetooth se abre y cierra una sola vez.
   static Future<PrintResult> printImageBluetooth({
     required String mac,
     required String imageBase64,
     PrinterConfig config = const PrinterConfig(),
+    int copies = 1,
   }) {
     return ZebraBtPrinterPlatform.instance.printImageBluetooth(
       mac: mac,
       imageBase64: imageBase64,
       config: config,
+      copies: copies,
     );
   }
 

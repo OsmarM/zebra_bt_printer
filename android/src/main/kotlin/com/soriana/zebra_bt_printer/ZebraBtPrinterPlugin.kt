@@ -161,6 +161,7 @@ class ZebraBtPrinterPlugin :
         val mac         = call.argument<String>("mac")         ?: return result.error("INVALID_ARGS", "mac es requerido", null)
         val imageBase64 = call.argument<String>("imageBase64") ?: return result.error("INVALID_ARGS", "imageBase64 es requerido", null)
         val config      = PrintConfig.fromCall(call)
+        val copies      = (call.argument<Int>("copies") ?: 1).coerceIn(1, 999)
 
         if (!hasBluetoothPermissions()) {
             return result.error(
@@ -173,7 +174,7 @@ class ZebraBtPrinterPlugin :
 
         runInBackground {
             try {
-                withRetry(MAX_RETRIES) { printImageViaBluetooth(mac, imageBase64, config) }
+                withRetry(MAX_RETRIES) { printImageViaBluetooth(mac, imageBase64, config, copies) }
                 runOnUiThread(result) { it.success(true) }
             } catch (e: Exception) {
                 runOnUiThread(result) { it.error("PRINT_ERROR", e.message, null) }
@@ -318,17 +319,22 @@ class ZebraBtPrinterPlugin :
 
     // ─────────────────────────── Zebra printing ──────────────────────────────
 
-    private fun printImageViaBluetooth(mac: String, imageBase64: String, config: PrintConfig) {
+    private fun printImageViaBluetooth(
+        mac: String,
+        imageBase64: String,
+        config: PrintConfig,
+        copies: Int = 1,
+    ) {
         val persistent = synchronized(persistentConnections) { persistentConnections[mac] }
         val conn       = persistent ?: run {
-            // Sin conexión persistente: abre una conexión temporal para esta impresión.
             cancelBluetoothDiscovery()
             BluetoothConnection(mac).also { it.open() }
         }
 
-        val closeable = persistent == null   // solo cerrar si la abrimos nosotros
+        val closeable = persistent == null
 
         try {
+            // Decodificar y redimensionar la imagen una sola vez para todas las copias.
             val bitmap  = decodeBase64ToBitmap(imageBase64)
             val resized = resizeBitmap(
                 bitmap, config.labelWidthDots, config.labelHeightDots,
@@ -338,15 +344,18 @@ class ZebraBtPrinterPlugin :
             val offsetX = maxOf(0, (config.labelWidthDots - resized.width) / 2)
             val offsetY = maxOf(0, (config.labelHeightDots - resized.height) / 2)
 
+            // Configurar la impresora una sola vez.
             val header = "^XA\n${config.zplMediaCommand}\n^PW${config.labelWidthDots}\n^LL${config.labelHeightDots}\n^XZ"
             conn.write(header.toByteArray())
 
             val printer    = ZebraPrinterFactory.getInstance(conn)
             val zebraImage = ZebraImageAndroid(resized)
-            printer.printImage(zebraImage, offsetX, offsetY, resized.width, resized.height, false)
+
+            // Imprimir N copias sin abrir/cerrar la conexión entre ellas.
+            repeat(copies) {
+                printer.printImage(zebraImage, offsetX, offsetY, resized.width, resized.height, false)
+            }
         } catch (e: Exception) {
-            // Si la conexión persistente falló, la eliminamos del cache para
-            // que la próxima llamada abra una conexión nueva.
             if (!closeable) {
                 synchronized(persistentConnections) { persistentConnections.remove(mac) }
                 safeClose(conn)

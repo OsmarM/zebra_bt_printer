@@ -22,10 +22,12 @@ abstract class ZebraBtPrinterPlatform extends PlatformInterface {
   }
 
   /// Imprime una imagen [imageBase64] en la impresora Bluetooth con dirección [mac].
+  /// [copies] indica cuántas copias imprimir dentro de una sola conexión BT.
   Future<PrintResult> printImageBluetooth({
     required String mac,
     required String imageBase64,
     PrinterConfig config = const PrinterConfig(),
+    int copies = 1,
   }) {
     throw UnimplementedError('printImageBluetooth() has not been implemented.');
   }

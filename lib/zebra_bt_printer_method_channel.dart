@@ -14,11 +14,13 @@ class MethodChannelZebraBtPrinter extends ZebraBtPrinterPlatform {
     required String mac,
     required String imageBase64,
     PrinterConfig config = const PrinterConfig(),
+    int copies = 1,
   }) async {
     try {
       await methodChannel.invokeMethod<void>('printImageBluetooth', {
         'mac': mac,
         'imageBase64': imageBase64,
+        'copies': copies.clamp(1, 999),
         ...config.toMap(),
       });
       return const PrintResult.success();
