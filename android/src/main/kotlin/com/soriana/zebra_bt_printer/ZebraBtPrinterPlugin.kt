@@ -110,6 +110,7 @@ class ZebraBtPrinterPlugin :
         when (call.method) {
             "connectBluetooth"    -> handleConnectBluetooth(call, result)
             "disconnectBluetooth" -> handleDisconnectBluetooth(call, result)
+            "calibratePrinter"    -> handleCalibratePrinter(call, result)
             "printImageBluetooth" -> handlePrintImageBluetooth(call, result)
             "printImageIP"        -> handlePrintImageIP(call, result)
             "printLabelBluetooth" -> handlePrintLabelBluetooth(call, result)
@@ -138,6 +139,23 @@ class ZebraBtPrinterPlugin :
                 runOnUiThread(result) { it.success(true) }
             } catch (e: Exception) {
                 runOnUiThread(result) { it.error("CONNECT_ERROR", e.message, null) }
+            }
+        }
+    }
+
+    private fun handleCalibratePrinter(call: MethodCall, result: Result) {
+        val mac = call.argument<String>("mac") ?: return result.error("INVALID_ARGS", "mac es requerido", null)
+        if (!hasBluetoothPermissions()) {
+            return result.error("PERMISSION_DENIED", "Faltan permisos Bluetooth.", null)
+        }
+        runInBackground {
+            try {
+                val conn = getOrOpenConnection(mac)
+                conn.write("~JC".toByteArray())
+                Thread.sleep(3000)
+                runOnUiThread(result) { it.success(true) }
+            } catch (e: Exception) {
+                runOnUiThread(result) { it.error("CALIBRATE_ERROR", e.message, null) }
             }
         }
     }
@@ -334,26 +352,30 @@ class ZebraBtPrinterPlugin :
         val closeable = persistent == null
 
         try {
-            // Decodificar y redimensionar la imagen una sola vez para todas las copias.
-            val bitmap  = decodeBase64ToBitmap(imageBase64)
-            val resized = resizeBitmap(
-                bitmap, config.labelWidthDots, config.labelHeightDots,
+            val source      = decodeBase64ToBitmap(imageBase64)
+            val labelBitmap = createLabelBitmap(
+                source, config.labelWidthDots, config.labelHeightDots,
                 config.useSmoothScaling, config.allowUpscale,
             )
 
-            val offsetX = maxOf(0, (config.labelWidthDots - resized.width) / 2)
-            val offsetY = maxOf(0, (config.labelHeightDots - resized.height) / 2)
+            // ZPL completo generado por nosotros — sin SDK intermediario.
+            // El SDK de Zebra genera su propio ^LL interno en printImage() y lo pisa;
+            // aquí tenemos control total sobre cada comando ZPL.
+            val zpl = buildString {
+                append("^XA\n")
+                append("${config.zplMediaCommand}\n")
+                append("^PW${config.labelWidthDots}\n")
+                append("^LL${config.labelHeightDots}\n")
+                append("^ML${config.maxLabelLengthDots}\n")
+                if (config.labelTopOffset != 0) append("^LT${config.labelTopOffset}\n")
+                append("^FO0,0\n")
+                append(bitmapToZplGf(labelBitmap))
+                append("\n^XZ")
+            }
+            val zplBytes = zpl.toByteArray(Charsets.UTF_8)
 
-            // Configurar la impresora una sola vez.
-            val header = "^XA\n${config.zplMediaCommand}\n^PW${config.labelWidthDots}\n^LL${config.labelHeightDots}\n^XZ"
-            conn.write(header.toByteArray())
-
-            val printer    = ZebraPrinterFactory.getInstance(conn)
-            val zebraImage = ZebraImageAndroid(resized)
-
-            // Imprimir N copias sin abrir/cerrar la conexión entre ellas.
             repeat(copies) {
-                printer.printImage(zebraImage, offsetX, offsetY, resized.width, resized.height, false)
+                conn.write(zplBytes)
             }
         } catch (e: Exception) {
             if (!closeable) {
@@ -371,17 +393,23 @@ class ZebraBtPrinterPlugin :
         conn.open()
 
         try {
-            val bitmap  = decodeBase64ToBitmap(imageBase64)
-            val resized = resizeBitmap(
-                bitmap, config.labelWidthDots, config.labelHeightDots,
+            val source      = decodeBase64ToBitmap(imageBase64)
+            val labelBitmap = createLabelBitmap(
+                source, config.labelWidthDots, config.labelHeightDots,
                 config.useSmoothScaling, config.allowUpscale,
             )
-
-            val offsetX = maxOf(0, (config.labelWidthDots - resized.width) / 2)
-
-            val printer    = ZebraPrinterFactory.getInstance(conn)
-            val zebraImage = ZebraImageAndroid(resized)
-            printer.printImage(zebraImage, offsetX, 0, 0, 0, false)
+            val zpl = buildString {
+                append("^XA\n")
+                append("${config.zplMediaCommand}\n")
+                append("^PW${config.labelWidthDots}\n")
+                append("^LL${config.labelHeightDots}\n")
+                append("^ML${config.maxLabelLengthDots}\n")
+                if (config.labelTopOffset != 0) append("^LT${config.labelTopOffset}\n")
+                append("^FO0,0\n")
+                append(bitmapToZplGf(labelBitmap))
+                append("\n^XZ")
+            }
+            conn.write(zpl.toByteArray(Charsets.UTF_8))
         } finally {
             safeClose(conn)
         }
@@ -401,6 +429,74 @@ class ZebraBtPrinterPlugin :
     }
 
     // ─────────────────────────── Image utilities ─────────────────────────────
+
+    /**
+     * Crea un bitmap del tamaño exacto de la etiqueta ([labelW] × [labelH]).
+     *
+     * 1. Redimensiona [source] para que quepa dentro de la etiqueta (aspect ratio).
+     * 2. Crea un canvas blanco de [labelW] × [labelH].
+     * 3. Centra la imagen redimensionada sobre ese canvas.
+     *
+     * Al pasarle este bitmap al SDK con width=0, height=0, el SDK usa el tamaño
+     * natural del bitmap y genera el ^LL correcto en su ZPL interno.
+     */
+    private fun createLabelBitmap(
+        source: Bitmap,
+        labelW: Int,
+        labelH: Int,
+        smooth: Boolean,
+        allowUpscale: Boolean,
+    ): Bitmap {
+        val resized = resizeBitmap(source, labelW, labelH, smooth, allowUpscale)
+
+        val label  = Bitmap.createBitmap(labelW, labelH, Bitmap.Config.ARGB_8888)
+        label.eraseColor(android.graphics.Color.WHITE)
+
+        val left = (labelW - resized.width) / 2
+        val top  = (labelH - resized.height) / 2
+
+        Canvas(label).drawBitmap(resized, left.toFloat(), top.toFloat(), null)
+        return label
+    }
+
+    /**
+     * Convierte un Bitmap a comando ZPL ^GF (Graphic Field) en formato hex ASCII.
+     *
+     * Formato: ^GFA,[totalBytes],[totalBytes],[bytesPerRow],[hexData]
+     *   - 1 bit = 1 dot. Bit 1 (MSB primero) = negro (imprime). Bit 0 = blanco.
+     *   - Cada fila se rellena a múltiplo de byte.
+     */
+    private fun bitmapToZplGf(bitmap: Bitmap): String {
+        val w           = bitmap.width
+        val h           = bitmap.height
+        val bytesPerRow = (w + 7) / 8
+        val totalBytes  = bytesPerRow * h
+
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val sb = StringBuilder(totalBytes * 2 + 32)
+        sb.append("^GFA,$totalBytes,$totalBytes,$bytesPerRow,")
+
+        for (y in 0 until h) {
+            for (col in 0 until bytesPerRow) {
+                var byte = 0
+                for (bit in 0 until 8) {
+                    val x = col * 8 + bit
+                    byte = byte shl 1
+                    if (x < w) {
+                        val px  = pixels[y * w + x]
+                        val lum = (0.299 * android.graphics.Color.red(px) +
+                                   0.587 * android.graphics.Color.green(px) +
+                                   0.114 * android.graphics.Color.blue(px)).toInt()
+                        if (lum < 128) byte = byte or 1  // píxel oscuro → imprimir
+                    }
+                }
+                sb.append(String.format("%02X", byte))
+            }
+        }
+        return sb.toString()
+    }
 
     private fun decodeBase64ToBitmap(base64: String): Bitmap {
         val bytes = Base64.decode(base64, Base64.DEFAULT)
@@ -511,23 +607,40 @@ class ZebraBtPrinterPlugin :
         /** "gap" → ^MNA  |  "mark" → ^MNB  |  "none" → ^MNN */
         val mediaType: String,
         val allowUpscale: Boolean,
+        /**
+         * ^ML — distancia máxima (en dots) que la impresora avanza buscando la
+         * siguiente marca negra o gap. Por defecto = labelHeightDots * 2.
+         * Si la impresora sigue cortando antes de tiempo, aumenta este valor.
+         */
+        val maxLabelLengthDots: Int,
+        /**
+         * ^LT — desplazamiento vertical del área de impresión respecto a la marca
+         * (en dots, puede ser negativo). Ajusta si la imagen aparece desplazada
+         * hacia arriba o hacia abajo dentro de la etiqueta.
+         */
+        val labelTopOffset: Int,
     ) {
         /** Comando ZPL correspondiente al tipo de media. */
         val zplMediaCommand: String get() = when (mediaType) {
             "mark" -> "^MNB"
             "none" -> "^MNN"
-            else   -> "^MNA"   // "gap" y cualquier valor desconocido → gap sensing
+            else   -> "^MNA"
         }
 
         companion object {
-            fun fromCall(call: MethodCall) = PrintConfig(
-                labelWidthDots   = call.argument<Int>("labelWidthDots")         ?: 600,
-                labelHeightDots  = call.argument<Int>("labelHeightDots")        ?: 240,
-                useSmoothScaling = call.argument<Boolean>("useSmoothScaling")   ?: true,
-                printerType      = call.argument<String>("printerType")         ?: "zebra",
-                mediaType        = call.argument<String>("mediaType")           ?: "gap",
-                allowUpscale     = call.argument<Boolean>("allowUpscale")       ?: false,
-            )
+            fun fromCall(call: MethodCall): PrintConfig {
+                val labelHeightDots = call.argument<Int>("labelHeightDots") ?: 240
+                return PrintConfig(
+                    labelWidthDots     = call.argument<Int>("labelWidthDots")         ?: 600,
+                    labelHeightDots    = labelHeightDots,
+                    useSmoothScaling   = call.argument<Boolean>("useSmoothScaling")   ?: true,
+                    printerType        = call.argument<String>("printerType")         ?: "zebra",
+                    mediaType          = call.argument<String>("mediaType")           ?: "gap",
+                    allowUpscale       = call.argument<Boolean>("allowUpscale")       ?: false,
+                    maxLabelLengthDots = call.argument<Int>("maxLabelLengthDots")     ?: labelHeightDots * 2,
+                    labelTopOffset     = call.argument<Int>("labelTopOffset")         ?: 0,
+                )
+            }
         }
     }
 }

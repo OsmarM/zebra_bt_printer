@@ -108,4 +108,15 @@ class ZebraBtPrinter {
   static Future<bool> disconnectBluetooth({required String mac}) {
     return ZebraBtPrinterPlatform.instance.disconnectBluetooth(mac: mac);
   }
+
+  /// Calibra el sensor de media de la impresora enviando el comando ZPL `~JC`.
+  ///
+  /// La impresora avanzará 1-2 etiquetas para medir el espaciado de las marcas
+  /// o gaps y guardará la nueva calibración. Tarda ~3 segundos.
+  ///
+  /// **Cuándo llamarlo:** una sola vez cada vez que cambies el rollo de etiquetas
+  /// a un tamaño o tipo diferente (p. ej. de 3×1.2" a 3×3" con marcas negras).
+  static Future<bool> calibratePrinter({required String mac}) {
+    return ZebraBtPrinterPlatform.instance.calibratePrinter(mac: mac);
+  }
 }

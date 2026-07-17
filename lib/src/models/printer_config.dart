@@ -47,6 +47,22 @@ class PrinterConfig {
   /// de la etiqueta. Útil para etiquetas grandes (p. ej. 3" × 3").
   final bool allowUpscale;
 
+  /// Distancia máxima en dots que la impresora avanza buscando la siguiente
+  /// marca negra o gap antes de cortar (comando ZPL `^ML`).
+  ///
+  /// Por defecto es `labelHeightDots * 2`. Si la impresora sigue cortando la
+  /// etiqueta antes de tiempo con [LabelMediaType.mark], aumenta este valor.
+  /// Ejemplo para una etiqueta de 3" a 200 DPI: `1200` (600 × 2).
+  final int? maxLabelLengthDots;
+
+  /// Desplazamiento vertical del área de impresión respecto a la marca negra
+  /// o al inicio de la etiqueta (comando ZPL `^LT`, en dots).
+  ///
+  /// Valor positivo → la imagen se imprime más abajo dentro de la etiqueta.
+  /// Valor negativo → la imagen se imprime más arriba.
+  /// Útil cuando la imagen aparece desplazada con [LabelMediaType.mark].
+  final int labelTopOffset;
+
   const PrinterConfig({
     this.labelWidthDots = 600,
     this.labelHeightDots = 240,
@@ -54,6 +70,8 @@ class PrinterConfig {
     this.printerType = PrinterType.zebra,
     this.mediaType = LabelMediaType.gap,
     this.allowUpscale = false,
+    this.maxLabelLengthDots,
+    this.labelTopOffset = 0,
   });
 
   Map<String, dynamic> toMap() => {
@@ -63,5 +81,9 @@ class PrinterConfig {
         'printerType': printerType.name,
         'mediaType': mediaType.name,
         'allowUpscale': allowUpscale,
+        // null → el plugin usará labelHeightDots * 2 como default
+        if (maxLabelLengthDots != null)
+          'maxLabelLengthDots': maxLabelLengthDots,
+        'labelTopOffset': labelTopOffset,
       };
 }

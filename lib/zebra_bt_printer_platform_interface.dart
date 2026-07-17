@@ -72,4 +72,10 @@ abstract class ZebraBtPrinterPlatform extends PlatformInterface {
   Future<bool> disconnectBluetooth({required String mac}) {
     throw UnimplementedError('disconnectBluetooth() has not been implemented.');
   }
+
+  /// Calibra el sensor de media de la impresora (comando ZPL `~JC`).
+  /// Llamar una vez al cambiar el tipo o tamaño del rollo de etiquetas.
+  Future<bool> calibratePrinter({required String mac}) {
+    throw UnimplementedError('calibratePrinter() has not been implemented.');
+  }
 }

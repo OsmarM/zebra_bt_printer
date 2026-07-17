@@ -40,8 +40,8 @@ En el `pubspec.yaml` de tu app:
 dependencies:
   zebra_bt_printer:
     git:
-      url: https://github.com/<org>/zebra_bt_printer.git
-      ref: v1.0.0        # fija un tag/commit para builds reproducibles
+      url: https://github.com/OsmarM/zebra_bt_printer.git
+      ref: v1.4.0        # fija un tag/commit para builds reproducibles
 ```
 
 Alternativa local / monorepo:
@@ -131,8 +131,8 @@ encendido:
 ```dart
 Future<bool> _verificarListo() async {
   final concedido = await ZebraBtPrinter.requestPermissions();
-  if (!concedido) return false;             // el usuario rechazó el diálogo
-  return ZebraBtPrinter.isBluetoothEnabled(); // el adaptador debe estar encendido
+  if (!concedido) return false;
+  return ZebraBtPrinter.isBluetoothEnabled();
 }
 ```
 
@@ -140,44 +140,98 @@ Future<bool> _verificarListo() async {
   cuando **todos** los permisos requeridos fueron concedidos.
 - Si el usuario rechaza, devuelve `false` — muestra un mensaje pidiéndole que
   habilite los permisos de Bluetooth en los ajustes del sistema.
-- Si lo llamas otra vez mientras una solicitud previa sigue pendiente, devuelve
-  una falla con el código `PERMISSION_REQUEST_IN_PROGRESS` (el `Future` original
-  igual se resuelve cuando se responde el primer diálogo).
 
 ---
 
-## 5. Impresión
+## 5. Configuración de etiqueta (`PrinterConfig`)
+
+Todos los métodos de impresión aceptan un `PrinterConfig` opcional:
+
+```dart
+const PrinterConfig({
+  int    labelWidthDots  = 600,                  // ancho en dots
+  int    labelHeightDots = 240,                  // alto en dots
+  bool   useSmoothScaling = true,                // anti-aliasing al escalar
+  PrinterType    printerType  = PrinterType.zebra,
+  LabelMediaType mediaType    = LabelMediaType.gap,
+  bool   allowUpscale        = false,
+  int?   maxLabelLengthDots,                     // ^ML (default: labelHeightDots × 2)
+  int    labelTopOffset      = 0,                // ^LT offset vertical en dots
+})
+```
+
+### 5.1 Dimensiones (dots)
+
+`dots = pulgadas × DPI`. La mayoría de las impresoras portátiles Zebra son de
+**203 DPI** (llamado frecuentemente "200 DPI").
+
+| Etiqueta | Ancho | Alto | Dots ancho | Dots alto |
+| --- | --- | --- | --- | --- |
+| 3" × 1.2" | 3 pulg | 1.2 pulg | 600 | 240 |
+| 3" × 3" | 3 pulg | 3 pulg | 600 | 600 |
+| 4" × 6" | 4 pulg | 6 pulg | 812 | 1218 |
+
+### 5.2 Tipo de media (`LabelMediaType`)
+
+Controla cómo la impresora detecta el final de cada etiqueta:
+
+| Valor | Comando ZPL | Cuándo usarlo |
+| --- | --- | --- |
+| `LabelMediaType.gap` | `^MNA` | Etiquetas die-cut con espacio/gap entre ellas (**default**) |
+| `LabelMediaType.mark` | `^MNB` | Etiquetas con marca negra impresa en el reverso del rollo |
+| `LabelMediaType.none` | `^MNN` | Sin detección física; la longitud la controla solo `^LL` |
+
+> **Importante al usar `mark`:** cada vez que cambies a un rollo de diferente
+> tamaño debes llamar a `calibratePrinter()` para que la impresora mida el nuevo
+> espaciado de las marcas. Ver [§8](#8-cambio-de-rollo-y-calibración).
+
+### 5.3 Parámetros avanzados
+
+| Parámetro | Descripción |
+| --- | --- |
+| `allowUpscale` | Permite ampliar la imagen si es más pequeña que la etiqueta. Default `false`. |
+| `maxLabelLengthDots` | Distancia máxima que avanza la impresora buscando la siguiente marca/gap (`^ML`). Default: `labelHeightDots × 2`. |
+| `labelTopOffset` | Desplaza verticalmente el área de impresión en dots (`^LT`). Positivo = imagen más abajo; negativo = más arriba. |
+
+---
+
+## 6. Impresión
 
 Todos los métodos de impresión devuelven un `PrintResult`. En uso normal nunca
 lanzan excepciones — revisa `result.isSuccess`.
 
-### 5.1 Imprimir una imagen por Bluetooth
+### 6.1 Imprimir una imagen por Bluetooth
 
 ```dart
 final result = await ZebraBtPrinter.printImageBluetooth(
-  mac: '48:A4:93:DB:04:6F',          // dirección MAC de la impresora
-  imageBase64: imagenBase64,         // JPG o PNG en base64 (sin prefijo data:)
+  mac: '48:A4:93:DB:04:6F',
+  imageBase64: imagenBase64,
   config: const PrinterConfig(
-    labelWidthDots: 600,             // 3 pulgadas a 200 DPI
-    labelHeightDots: 250,
-    useSmoothScaling: true,
+    labelWidthDots:  600,
+    labelHeightDots: 240,
+    mediaType: LabelMediaType.gap,
+  ),
+  copies: 1,  // número de copias en una sola conexión BT
+);
+```
+
+El parámetro `copies` imprime N copias **dentro de la misma conexión Bluetooth**,
+lo cual es mucho más eficiente que llamar el método N veces (ver [§9](#9-rendimiento--impresión-en-lote)).
+
+### 6.2 Imprimir una imagen por TCP/IP
+
+```dart
+final result = await ZebraBtPrinter.printImageIP(
+  ip: '192.168.0.50',
+  imageBase64: imagenBase64,
+  config: const PrinterConfig(
+    labelWidthDots:  600,
+    labelHeightDots: 240,
   ),
 );
 ```
 
-La imagen se decodifica, se escala para caber dentro de
-`labelWidthDots × labelHeightDots` (nunca se agranda) y se centra en la etiqueta.
-
-### 5.2 Imprimir una imagen por TCP/IP
-
-```dart
-final result = await ZebraBtPrinter.printImageIP(
-  ip: '192.168.0.50',                // IP de la impresora, puerto ZPL por defecto (9100)
-  imageBase64: imagenBase64,
-);
-```
-
-### 5.3 Imprimir una etiqueta de texto por Bluetooth
+### 6.3 Imprimir texto ZPL por Bluetooth
 
 ```dart
 final result = await ZebraBtPrinter.printLabelBluetooth(
@@ -186,12 +240,9 @@ final result = await ZebraBtPrinter.printLabelBluetooth(
 );
 ```
 
-El texto se envuelve en una plantilla ZPL mínima. Para tener control total del
-diseño, genera tu propia etiqueta como imagen y usa `printImageBluetooth`.
-
 ---
 
-## 6. Generar la imagen en base64
+## 7. Generar la imagen en base64
 
 `imageBase64` es un JPG/PNG codificado en base64 **sin** el prefijo `data:`.
 
@@ -221,52 +272,135 @@ widget, codifícalo a bytes PNG y luego aplica `base64Encode`. Es la forma
 recomendada para imprimir etiquetas ricas y dinámicas (logos, códigos de barras,
 texto con formato).
 
----
-
-## 7. Elegir las dimensiones de la etiqueta
-
-Dots = pulgadas × DPI. La mayoría de las impresoras portátiles Zebra son de
-**203 DPI** (a menudo llamado "200 DPI").
-
-| Ancho de etiqueta | 203 DPI | 300 DPI |
-| --- | --- | --- |
-| 2 pulg | 406 dots | 600 dots |
-| 3 pulg | 609 dots | 900 dots |
-| 4 pulg | 812 dots | 1200 dots |
-
-Define `labelWidthDots` / `labelHeightDots` según el tamaño físico de tu etiqueta
-en dots. El valor por defecto `600 × 250` corresponde a una etiqueta tipo recibo
-de ~3 pulgadas de ancho a 203 DPI.
+> **Tip de resolución:** genera la imagen al tamaño exacto en píxeles que usarás
+> en `labelWidthDots × labelHeightDots`. Por ejemplo, para una etiqueta 3×3" a
+> 200 DPI genera un canvas de 600×600 píxeles. Así el plugin no necesita escalar
+> y la calidad es máxima.
 
 ---
 
-## 8. Patrón de uso recomendado (verificado)
+## 8. Cambio de rollo y calibración
 
-Este es el flujo probado en varias versiones de Android. La clave en Android 12+
-es **siempre `await requestPermissions()` e imprimir solo cuando devuelve
-`true`** — imprimir antes de que `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` estén
-concedidos es lo que dispara la SecurityException de `cancelDiscovery`.
+Cuando el operador carga un rollo de **diferente tamaño o tipo** debe calibrar
+la impresora una sola vez para que aprenda el espaciado de las nuevas etiquetas.
+
+```dart
+// Configs para cada tipo de rollo
+const configChica = PrinterConfig(
+  labelWidthDots:  600,
+  labelHeightDots: 240,
+  mediaType: LabelMediaType.gap,   // etiqueta die-cut estándar
+);
+
+const configGrande = PrinterConfig(
+  labelWidthDots:  600,
+  labelHeightDots: 600,
+  mediaType: LabelMediaType.mark,  // rollo con marca negra en el reverso
+);
+
+/// Llamar UNA VEZ al cargar un nuevo rollo.
+/// La impresora avanza 1-2 etiquetas midiendo las marcas (~3 seg).
+Future<void> calibrarImpresora(String mac) async {
+  final ok = await ZebraBtPrinter.calibratePrinter(mac: mac);
+  if (!ok) throw Exception('No se pudo calibrar la impresora');
+}
+
+/// Flujo completo al cambiar al rollo grande con marca negra.
+Future<void> cambiarAEtiquetaGrande(String mac, String imagenBase64) async {
+  await calibrarImpresora(mac);      // ← solo la primera vez por rollo
+  final result = await ZebraBtPrinter.printImageBluetooth(
+    mac: mac,
+    imageBase64: imagenBase64,
+    config: configGrande,
+  );
+  if (!result.isSuccess) throw Exception(result.errorMessage);
+}
+
+/// Flujo completo al cambiar al rollo chico (gap, sin calibración necesaria).
+Future<void> cambiarAEtiquetaChica(String mac, String imagenBase64) async {
+  // Las etiquetas gap normalmente no requieren recalibración
+  final result = await ZebraBtPrinter.printImageBluetooth(
+    mac: mac,
+    imageBase64: imagenBase64,
+    config: configChica,
+  );
+  if (!result.isSuccess) throw Exception(result.errorMessage);
+}
+```
+
+> La calibración se **guarda en la impresora**. No se repite en cada impresión,
+> solo cuando se carga un rollo diferente.
+
+---
+
+## 9. Rendimiento — impresión en lote
+
+Abrir y cerrar la conexión Bluetooth toma ~4-6 segundos. Para imprimir varias
+etiquetas seguidas usa `copies` o la conexión persistente:
+
+### Opción A — `copies` (mismo diseño, N copias)
+
+```dart
+await ZebraBtPrinter.printImageBluetooth(
+  mac: mac,
+  imageBase64: imagenBase64,
+  config: configChica,
+  copies: 5,   // 5 copias, 1 sola conexión BT
+);
+```
+
+### Opción B — conexión persistente (diseños distintos)
+
+```dart
+await ZebraBtPrinter.connectBluetooth(mac: mac);
+try {
+  for (final etiqueta in lote) {
+    await ZebraBtPrinter.printImageBluetooth(
+      mac: mac,
+      imageBase64: etiqueta.base64,
+      config: configChica,
+    );
+  }
+} finally {
+  await ZebraBtPrinter.disconnectBluetooth(mac: mac);
+}
+```
+
+| Escenario | Tiempo aprox. |
+| --- | --- |
+| 1 etiqueta (sin conexión previa) | ~6-8 s |
+| 5 etiquetas con `copies: 5` | ~9-11 s |
+| 5 etiquetas con conexión persistente | ~11-13 s |
+| 5 etiquetas sin optimización (5 llamadas) | ~30-40 s |
+
+---
+
+## 10. Patrón de uso recomendado (verificado)
 
 ```dart
 Future<void> imprimirEtiqueta(String mac, String imagenBase64) async {
   // 1. Solicita permisos y ESPERA la respuesta del usuario.
-  //    En Android 12+ esto muestra el diálogo de "Dispositivos cercanos".
   final concedido = await ZebraBtPrinter.requestPermissions();
   if (!concedido) {
     _mostrarError('Se requieren permisos de Bluetooth. Actívalos en Ajustes.');
     return;
   }
 
-  // 2. Asegúrate de que el adaptador Bluetooth esté encendido.
+  // 2. Verifica que el Bluetooth esté encendido.
   if (!await ZebraBtPrinter.isBluetoothEnabled()) {
     _mostrarError('Por favor enciende el Bluetooth.');
     return;
   }
 
-  // 3. Imprime (el plugin abre la conexión, imprime y la cierra).
+  // 3. Imprime.
   final result = await ZebraBtPrinter.printImageBluetooth(
     mac: mac,
     imageBase64: imagenBase64,
+    config: const PrinterConfig(
+      labelWidthDots:  600,
+      labelHeightDots: 240,
+      mediaType: LabelMediaType.gap,
+    ),
   );
 
   // 4. Maneja el resultado tipado.
@@ -275,16 +409,11 @@ Future<void> imprimirEtiqueta(String mac, String imagenBase64) async {
   } else {
     switch (result.errorCode) {
       case 'PERMISSION_DENIED':
-        // Los permisos se revocaron entre el paso 1 y la impresión.
         _mostrarError('Concede los permisos de Bluetooth e inténtalo de nuevo.');
-        break;
       case 'UNSUPPORTED_PLATFORM':
         _mostrarError('La impresión solo está disponible en Android.');
-        break;
       case 'PRINT_ERROR':
-        // Impresora apagada, fuera de rango u ocupada con otro teléfono.
         _mostrarError('No se pudo alcanzar la impresora: ${result.errorMessage}');
-        break;
       default:
         _mostrarError('Falló la impresión: ${result.errorMessage}');
     }
@@ -292,60 +421,58 @@ Future<void> imprimirEtiqueta(String mac, String imagenBase64) async {
 }
 ```
 
-> ⚠️ **No imprimas antes de que `requestPermissions()` se resuelva.** En
-> Android 12+ el SDK de Zebra llama a `cancelDiscovery()` al abrir la conexión
-> Bluetooth, lo cual requiere `BLUETOOTH_SCAN`. Si imprimes antes, obtienes el
-> error *"Need android.permission.BLUETOOTH_SCAN permission … AdapterService
-> cancelDiscovery"*.
-
 ---
 
-## 9. Referencia de errores
+## 11. Referencia de errores
 
 | `errorCode` | Cuándo ocurre | Manejo sugerido |
 | --- | --- | --- |
 | `INVALID_ARGS` | Un argumento requerido (mac/ip/imagen/texto) fue nulo o vacío. | Valida las entradas antes de llamar. |
-| `PERMISSION_DENIED` | Se intentó imprimir por Bluetooth sin `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` concedidos (Android 12+). | Llama a `requestPermissions()`, que el usuario acepte, y reintenta. |
-| `PRINT_ERROR` | Impresora inalcanzable, apagada, fuera de rango u ocupada con otro teléfono. | Reintenta; revisa energía/emparejamiento/rango. |
+| `PERMISSION_DENIED` | Se intentó imprimir sin `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` concedidos. | Llama a `requestPermissions()` y reintenta. |
+| `PRINT_ERROR` | Impresora inalcanzable, apagada, fuera de rango u ocupada. | Reintenta; revisa energía/emparejamiento/rango. |
+| `CONNECT_ERROR` | `connectBluetooth()` no pudo abrir la conexión persistente. | Verifica que la impresora esté encendida y en rango. |
+| `CALIBRATE_ERROR` | `calibratePrinter()` falló al enviar `~JC`. | Verifica la conexión e inténtalo de nuevo. |
 | `NO_ACTIVITY` | Se llamó a `requestPermissions()` sin una Activity en primer plano. | Llámalo desde una pantalla activa. |
-| `PERMISSION_REQUEST_IN_PROGRESS` | Una segunda solicitud de permisos se superpuso con la primera. | Espera a que termine la primera antes de reintentar. |
+| `PERMISSION_REQUEST_IN_PROGRESS` | Una segunda solicitud de permisos se superpuso con la primera. | Espera a que termine la primera. |
 | `UNSUPPORTED_PLATFORM` | Cualquier llamada en iOS. | Limita la función a Android. |
 
 ---
 
-## 10. Solución de problemas
+## 12. Solución de problemas
 
-**El build falla con "More than one file was found with OS independent path
-META-INF/…"** → Agrega el bloque `packaging` de la [§3.3](#33-empaquetado-solo-si-aparece-un-error-de-merge).
+**El build falla con "More than one file was found with OS independent path META-INF/…"**
+→ Agrega el bloque `packaging` de la [§3.3](#33-empaquetado-solo-si-aparece-un-error-de-merge).
 
-**`Need android.permission.BLUETOOTH_SCAN permission … AdapterService
-cancelDiscovery`** → Imprimiste antes de que se concediera `BLUETOOTH_SCAN`.
-Asegúrate de hacer `await ZebraBtPrinter.requestPermissions()` y que devuelva
-`true` *antes* de llamar a cualquier `printImageBluetooth`/`printLabelBluetooth`.
-Es más común en Android 12+ (no ocurre en Android 11 o anterior). Ver
-[§8](#8-patrón-de-uso-recomendado-verificado).
+**`Need android.permission.BLUETOOTH_SCAN permission … cancelDiscovery`**
+→ Imprimiste antes de que se concediera `BLUETOOTH_SCAN`. Asegúrate de hacer
+`await ZebraBtPrinter.requestPermissions()` y que devuelva `true` *antes* de
+imprimir. Ver [§10](#10-patrón-de-uso-recomendado-verificado).
 
-**`requestPermissions()` devuelve `false` aun después de conceder** → En algunas
-ROMs de fabricantes el usuario también debe conceder "Dispositivos cercanos".
-Envía al usuario a los Ajustes de la app.
+**`PRINT_ERROR` de inmediato**
+→ Verifica que la impresora esté encendida, emparejada en los ajustes de
+Bluetooth de Android y dentro de rango.
 
-**`PRINT_ERROR` de inmediato** → Verifica que la impresora esté encendida,
-emparejada en los ajustes de Bluetooth de Android y dentro de rango. Para
-Bluetooth, la MAC debe ser la de la impresora (formato `AA:BB:CC:DD:EE:FF`). Para
-TCP/IP, confirma que el dispositivo y la impresora estén en la misma red y que el
-puerto 9100 sea alcanzable.
+**La etiqueta se corta antes de tiempo con `LabelMediaType.mark`**
+→ La impresora tiene calibración del rollo anterior. Llama a
+`calibratePrinter()` con el nuevo rollo cargado. Ver [§8](#8-cambio-de-rollo-y-calibración).
 
-**La imagen se imprime muy pequeña / descentrada** → Ajusta `labelWidthDots` /
-`labelHeightDots` al tamaño físico de tu etiqueta según el DPI de la impresora
-(ver [§7](#7-elegir-las-dimensiones-de-la-etiqueta)).
+**La imagen se imprime completa pero se extiende entre dos etiquetas**
+→ Usa `LabelMediaType.mark` (con calibración previa) o `LabelMediaType.gap`
+en lugar de `none`. Verifica también que `labelHeightDots` coincida con el
+tamaño físico del rollo.
 
-**No imprime nada pero `isSuccess` es `true`** → El trabajo se envió
-correctamente; revisa el medio/calibración de la impresora y que el formato de
-etiqueta coincida con el papel cargado.
+**La imagen se imprime pequeña / centrada con espacio en blanco**
+→ La imagen en base64 tiene menos píxeles que los dots de la etiqueta. Genera
+la imagen al tamaño exacto (`labelWidthDots × labelHeightDots` píxeles) o activa
+`allowUpscale: true`.
+
+**No imprime nada pero `isSuccess` es `true`**
+→ El trabajo se envió correctamente; revisa el medio/calibración de la
+impresora y que el formato de etiqueta coincida con el papel cargado.
 
 ---
 
-## 11. Preguntas frecuentes
+## 13. Preguntas frecuentes
 
 **¿Descubre/escanea impresoras cercanas?** No. Tú proporcionas la dirección MAC
 (o IP). Usa los ajustes de Bluetooth del sistema o un paquete de descubrimiento
@@ -361,55 +488,31 @@ ZQ, ZD y similares).
 básica. Para control total de ZPL, renderiza tu etiqueta como imagen y usa
 `printImageBluetooth`.
 
+**¿Qué DPI tiene mi impresora?** Las impresoras Zebra ZQ y ZD portable suelen
+ser 203 DPI. Puedes confirmar en la etiqueta de configuración que imprime al
+encender la impresora.
+
 ---
 
-## 12. Ciclo de vida de la conexión y desconectar un dispositivo
+## 14. Ciclo de vida de la conexión
 
-### El plugin se desconecta automáticamente
+### Conexión automática (default)
 
-**No hay una conexión persistente** que administrar y **no se necesita ninguna
-llamada `disconnect()`**. Cada método de impresión sigue el mismo ciclo de vida
-corto:
+Sin llamar a `connectBluetooth`, cada impresión sigue el ciclo corto:
 
 ```
-open() ─► (cancelDiscovery) ─► write/printImage ─► close()
+open() ─► cancelDiscovery ─► write ZPL ─► close()
 ```
 
-La conexión **siempre se cierra** al terminar el trabajo —con éxito o con
-error— (mediante un `safeClose` interno). Por lo tanto, después de cada
-impresión tu teléfono ya está desconectado de la impresora. Esto es intencional:
-las impresoras Bluetooth Clásico (SPP) aceptan **una sola conexión a la vez**, así
-que mantener la conexión abierta bloquearía a cualquier otro teléfono.
+### Conexión persistente
 
-### Liberar una impresora "ocupada" por otro teléfono
+Con `connectBluetooth` / `disconnectBluetooth` la conexión permanece abierta
+entre impresiones. Ver [§9](#9-rendimiento--impresión-en-lote).
 
-Si recibes `PRINT_ERROR` porque otro teléfono está conectado en ese momento,
-tienes tres opciones:
+### Liberar una impresora ocupada
 
-1. **Esperar y reintentar** — el plugin ya reintenta varias veces con una breve
-   espera. En cuanto el trabajo del otro teléfono termina (y su conexión se
-   cierra), el tuyo tiene éxito.
-2. **Que el otro teléfono termine su impresión** — como cada trabajo se cierra
-   solo, el bloqueo se libera en segundos.
-3. **Apagar y encender la impresora** — para soltar una sesión atascada (último
-   recurso, p. ej. una app que se cerró a mitad de la impresión).
+Si recibes `PRINT_ERROR` porque otro teléfono está conectado:
 
-### Desemparejar por completo una impresora del teléfono
-
-"Desconectar" a nivel del sistema (eliminar el emparejamiento/bond) es una
-**acción del sistema**, no algo que haga este plugin. Indica al usuario:
-
-**Ajustes de Android → Dispositivos conectados / Bluetooth → toca la impresora →
-Olvidar / Desvincular.**
-
-Tras desemparejar, la siguiente impresión Bluetooth a esa MAC volverá a
-establecer el emparejamiento (el sistema puede pedirlo). No existe una API a
-nivel de app para forzar el desemparejamiento de un dispositivo vinculado en
-Android moderno sin permisos privilegiados.
-
-### Prefiere TCP/IP para impresoras compartidas
-
-Si varios teléfonos deben imprimir en la **misma** impresora con frecuencia, usa
-una impresora **conectada a la red** y `printImageIP`. La impresora encola los
-trabajos y atiende a múltiples clientes, así que no hay un bloqueo de conexión
-única de Bluetooth por el que competir.
+1. **Esperar y reintentar** — el plugin ya reintenta automáticamente.
+2. **Que el otro teléfono termine** — la conexión se cierra sola al terminar el trabajo.
+3. **Apagar y encender la impresora** — último recurso para sesiones atascadas.

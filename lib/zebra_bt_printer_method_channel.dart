@@ -95,4 +95,10 @@ class MethodChannelZebraBtPrinter extends ZebraBtPrinterPlatform {
     final ok = await methodChannel.invokeMethod<bool>('disconnectBluetooth', {'mac': mac});
     return ok ?? false;
   }
+
+  @override
+  Future<bool> calibratePrinter({required String mac}) async {
+    final ok = await methodChannel.invokeMethod<bool>('calibratePrinter', {'mac': mac});
+    return ok ?? false;
+  }
 }
