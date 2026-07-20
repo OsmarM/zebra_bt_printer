@@ -1,5 +1,6 @@
 library zebra_bt_printer;
 
+export 'src/models/print_error_code.dart';
 export 'src/models/print_result.dart';
 export 'src/models/printer_config.dart';
 export 'zebra_bt_printer_platform_interface.dart'
@@ -17,7 +18,7 @@ import 'zebra_bt_printer_platform_interface.dart';
 ///   mac: '48:A4:93:DB:04:6F',
 ///   imageBase64: myBase64String,
 /// );
-/// if (result.isSuccess) { ... }
+/// if (result.isSuccess) { ... } else { show(result.userMessage); }
 /// ```
 class ZebraBtPrinter {
   ZebraBtPrinter._();

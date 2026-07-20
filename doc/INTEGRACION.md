@@ -26,7 +26,7 @@ para copiar, y la solución de problemas.
 
 El SDK Link-OS de Zebra **no tiene equivalente para iOS** en este plugin. En iOS
 el plugin es un stub: las llamadas de impresión devuelven `PrintResult.failure`
-con el código `UNSUPPORTED_PLATFORM`, y `requestPermissions()` /
+con `PrintErrorCode.unsupportedPlatform`, y `requestPermissions()` /
 `isBluetoothEnabled()` devuelven `false`. Tu código no necesita lógica especial
 para iOS, basta con revisar `isSuccess`.
 
@@ -407,15 +407,21 @@ Future<void> imprimirEtiqueta(String mac, String imagenBase64) async {
   if (result.isSuccess) {
     _mostrarExito('Impreso.');
   } else {
+    // userMessage: mensaje estable para UI
+    _mostrarError(result.userMessage!);
+    // errorMessage / rawErrorCode: detalle técnico para logs
+    debugPrint('[${result.rawErrorCode}] ${result.errorMessage}');
+
+    // Opcional: ramificar por código tipado
     switch (result.errorCode) {
-      case 'PERMISSION_DENIED':
-        _mostrarError('Concede los permisos de Bluetooth e inténtalo de nuevo.');
-      case 'UNSUPPORTED_PLATFORM':
-        _mostrarError('La impresión solo está disponible en Android.');
-      case 'PRINT_ERROR':
-        _mostrarError('No se pudo alcanzar la impresora: ${result.errorMessage}');
+      case PrintErrorCode.permissionDenied:
+        // redirigir a Ajustes, etc.
+        break;
+      case PrintErrorCode.printError:
+        // reintentar, etc.
+        break;
       default:
-        _mostrarError('Falló la impresión: ${result.errorMessage}');
+        break;
     }
   }
 }
@@ -425,16 +431,21 @@ Future<void> imprimirEtiqueta(String mac, String imagenBase64) async {
 
 ## 11. Referencia de errores
 
-| `errorCode` | Cuándo ocurre | Manejo sugerido |
-| --- | --- | --- |
-| `INVALID_ARGS` | Un argumento requerido (mac/ip/imagen/texto) fue nulo o vacío. | Valida las entradas antes de llamar. |
-| `PERMISSION_DENIED` | Se intentó imprimir sin `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` concedidos. | Llama a `requestPermissions()` y reintenta. |
-| `PRINT_ERROR` | Impresora inalcanzable, apagada, fuera de rango u ocupada. | Reintenta; revisa energía/emparejamiento/rango. |
-| `CONNECT_ERROR` | `connectBluetooth()` no pudo abrir la conexión persistente. | Verifica que la impresora esté encendida y en rango. |
-| `CALIBRATE_ERROR` | `calibratePrinter()` falló al enviar `~JC`. | Verifica la conexión e inténtalo de nuevo. |
-| `NO_ACTIVITY` | Se llamó a `requestPermissions()` sin una Activity en primer plano. | Llámalo desde una pantalla activa. |
-| `PERMISSION_REQUEST_IN_PROGRESS` | Una segunda solicitud de permisos se superpuso con la primera. | Espera a que termine la primera. |
-| `UNSUPPORTED_PLATFORM` | Cualquier llamada en iOS. | Limita la función a Android. |
+Los métodos de impresión mapean el código nativo a un [PrintErrorCode] tipado.
+Usa `result.userMessage` en la UI y `result.errorMessage` en logs.
+
+| `PrintErrorCode` | Código nativo | Cuándo ocurre | Manejo sugerido |
+| --- | --- | --- | --- |
+| `invalidArgs` | `INVALID_ARGS` | Un argumento requerido (mac/ip/imagen/texto) fue nulo o vacío. | Valida las entradas antes de llamar. |
+| `permissionDenied` | `PERMISSION_DENIED` | Se intentó imprimir sin `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` concedidos. | Llama a `requestPermissions()` y reintenta. |
+| `printError` | `PRINT_ERROR` | Impresora inalcanzable, apagada, fuera de rango u ocupada. | Reintenta; revisa energía/emparejamiento/rango. |
+| `connectError` | `CONNECT_ERROR` | `connectBluetooth()` no pudo abrir la conexión persistente. | Verifica que la impresora esté encendida y en rango. |
+| `calibrateError` | `CALIBRATE_ERROR` | `calibratePrinter()` falló al enviar `~JC`. | Verifica la conexión e inténtalo de nuevo. |
+| `disconnectError` | `DISCONNECT_ERROR` | Falló al cerrar la conexión persistente. | Reintenta el cierre; ignora si ya estaba cerrada. |
+| `noActivity` | `NO_ACTIVITY` | Se llamó a `requestPermissions()` sin una Activity en primer plano. | Llámalo desde una pantalla activa. |
+| `permissionRequestInProgress` | `PERMISSION_REQUEST_IN_PROGRESS` | Una segunda solicitud de permisos se superpuso con la primera. | Espera a que termine la primera. |
+| `unsupportedPlatform` | `UNSUPPORTED_PLATFORM` | Cualquier llamada en iOS. | Limita la función a Android. |
+| `unknown` | *(código no reconocido)* | Código nativo nuevo o inesperado. | Muestra `userMessage`; registra `rawErrorCode`. |
 
 ---
 

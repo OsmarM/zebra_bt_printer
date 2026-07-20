@@ -56,8 +56,27 @@ void main() {
     );
 
     expect(result.isSuccess, isFalse);
-    expect(result.errorCode, 'PRINT_ERROR');
+    expect(result.errorCode, PrintErrorCode.printError);
     expect(result.errorMessage, 'printer offline');
+    expect(result.userMessage, PrintErrorCode.printError.userMessage);
+    expect(result.rawErrorCode, 'PRINT_ERROR');
+  });
+
+  test('unknown PlatformException code maps to PrintErrorCode.unknown', () async {
+    mockHandler((_) async => throw PlatformException(
+          code: 'SOMETHING_NEW',
+          message: 'future native error',
+        ));
+
+    final result = await platform.printImageBluetooth(
+      mac: 'AA:BB:CC:DD:EE:FF',
+      imageBase64: 'AAAA',
+    );
+
+    expect(result.isSuccess, isFalse);
+    expect(result.errorCode, PrintErrorCode.unknown);
+    expect(result.rawErrorCode, 'SOMETHING_NEW');
+    expect(result.userMessage, PrintErrorCode.unknown.userMessage);
   });
 
   test('isBluetoothEnabled returns false when the platform throws', () async {

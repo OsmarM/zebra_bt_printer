@@ -1,3 +1,11 @@
+## 1.5.0
+
+* Breaking: `PrintResult.errorCode` is now a typed `PrintErrorCode` enum
+  instead of a raw `String?`.
+* Added stable `userMessage` for UI and kept `errorMessage` / `rawErrorCode`
+  for technical logging.
+* Unknown native codes map to `PrintErrorCode.unknown`.
+
 ## 1.0.0
 
 * Print base64 images to Zebra printers over Bluetooth and TCP/IP (auto-scaled
