@@ -4,6 +4,7 @@ import 'src/models/print_result.dart';
 import 'src/models/printer_config.dart';
 import 'zebra_bt_printer_method_channel.dart';
 
+export 'src/models/print_error_code.dart';
 export 'src/models/print_result.dart';
 export 'src/models/printer_config.dart';
 

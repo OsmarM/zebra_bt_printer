@@ -23,8 +23,8 @@ call with copy-paste examples, and troubleshooting.
 | Target devices | Android only (Bluetooth Classic capable) |
 
 The Zebra Link-OS SDK has **no iOS counterpart in this plugin**. On iOS the
-plugin is a stub: print calls return `PrintResult.failure` with code
-`UNSUPPORTED_PLATFORM`, and `requestPermissions()` / `isBluetoothEnabled()`
+plugin is a stub: print calls return `PrintResult.failure` with
+`PrintErrorCode.unsupportedPlatform`, and `requestPermissions()` / `isBluetoothEnabled()`
 return `false`. Your code does not need iOS-specific branching — just check
 `isSuccess`.
 
@@ -401,15 +401,27 @@ Future<void> printLabel(String mac, String base64Image) async {
   if (result.isSuccess) {
     _showSuccess('Printed.');
   } else {
+    // userMessage: stable text for UI
+    _showError(result.userMessage!);
+    // errorMessage / rawErrorCode: technical detail for logs
+    debugPrint('[${result.rawErrorCode}] ${result.errorMessage}');
+
+    // Optional: branch on the typed code
     switch (result.errorCode) {
-      case 'PERMISSION_DENIED':
-        _showError('Grant Bluetooth permissions, then try again.');
-      case 'UNSUPPORTED_PLATFORM':
-        _showError('Printing is only available on Android.');
-      case 'PRINT_ERROR':
-        _showError('Could not reach the printer: ${result.errorMessage}');
+      case PrintErrorCode.permissionDenied:
+        // open Settings, etc.
+        break;
+      case PrintErrorCode.paperOut:
+        // ask to reload media
+        break;
+      case PrintErrorCode.printTimeout:
+        // check printer / retry
+        break;
+      case PrintErrorCode.printError:
+        // retry, etc.
+        break;
       default:
-        _showError('Print failed: ${result.errorMessage}');
+        break;
     }
   }
 }
@@ -419,16 +431,30 @@ Future<void> printLabel(String mac, String base64Image) async {
 
 ## 11. Error reference
 
-| `errorCode` | When it happens | Suggested handling |
-| --- | --- | --- |
-| `INVALID_ARGS` | A required argument (mac/ip/image/text) was null or empty. | Validate inputs before calling. |
-| `PERMISSION_DENIED` | A Bluetooth print was attempted without `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` granted. | Call `requestPermissions()` and retry. |
-| `PRINT_ERROR` | Printer unreachable, off, out of range, or busy. | Retry, check power/pairing/range. |
-| `CONNECT_ERROR` | `connectBluetooth()` could not open the persistent connection. | Verify the printer is on and in range. |
-| `CALIBRATE_ERROR` | `calibratePrinter()` failed to send `~JC`. | Check connection and retry. |
-| `NO_ACTIVITY` | `requestPermissions()` called with no foreground Activity. | Call from a live screen. |
-| `PERMISSION_REQUEST_IN_PROGRESS` | A second permission request overlapped the first. | Await the first call before retrying. |
-| `UNSUPPORTED_PLATFORM` | Any call on iOS. | Gate the feature to Android. |
+Print methods map the native code to a typed [PrintErrorCode].
+Use `result.userMessage` in the UI and `result.errorMessage` in logs.
+
+| `PrintErrorCode` | Native code | When it happens | Suggested handling |
+| --- | --- | --- | --- |
+| `invalidArgs` | `INVALID_ARGS` | A required argument (mac/ip/image/text) was null or empty. | Validate inputs before calling. |
+| `permissionDenied` | `PERMISSION_DENIED` | A Bluetooth print was attempted without `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` granted. | Call `requestPermissions()` and retry. |
+| `printError` | `PRINT_ERROR` | Printer unreachable, off, out of range, or busy. | Retry, check power/pairing/range. |
+| `connectError` | `CONNECT_ERROR` | `connectBluetooth()` could not open the persistent connection. | Verify the printer is on and in range. |
+| `calibrateError` | `CALIBRATE_ERROR` | `calibratePrinter()` failed to send `~JC`. | Check connection and retry. |
+| `disconnectError` | `DISCONNECT_ERROR` | Failed to close the persistent connection. | Retry disconnect; ignore if already closed. |
+| `noActivity` | `NO_ACTIVITY` | `requestPermissions()` called with no foreground Activity. | Call from a live screen. |
+| `permissionRequestInProgress` | `PERMISSION_REQUEST_IN_PROGRESS` | A second permission request overlapped the first. | Await the first call before retrying. |
+| `unsupportedPlatform` | `UNSUPPORTED_PLATFORM` | Any call on iOS. | Gate the feature to Android. |
+| `paperOut` | `PAPER_OUT` | Printer reported out of paper in the pre-check or when confirming batch completion. | Reload media and retry. |
+| `printTimeout` | `PRINT_TIMEOUT` | The batch was sent but the printer did not confirm completion in time. | Check media/status; retry. |
+| `unknown` | *(unrecognized code)* | New or unexpected native code. | Show `userMessage`; log `rawErrorCode`. |
+
+> **Note — end-of-batch confirmation:** after sending all copies (`write`×N), the
+> plugin polls printer status until the printer is ready or fails. `isSuccess`
+> means the batch **finished processing**, not only that data was queued. There
+> is no “k of N” progress (no per-label confirmation). Deadline:
+> `min(120s, 8s + copies × 4s)`. On some mobiles already in error, the SDK may
+> fail the status query and that surfaces as `printError`.
 
 ---
 

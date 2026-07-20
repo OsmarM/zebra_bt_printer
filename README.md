@@ -46,7 +46,10 @@ final result = await ZebraBtPrinter.printImageBluetooth(
 if (result.isSuccess) {
   print('Printed!');
 } else {
-  print('Failed: [${result.errorCode}] ${result.errorMessage}');
+  // userMessage: texto estable para UI
+  print(result.userMessage);
+  // errorMessage / rawErrorCode: detalle técnico para logs
+  print('log: [${result.rawErrorCode}] ${result.errorMessage}');
 }
 ```
 
@@ -86,7 +89,7 @@ required Android setup.
 | Field | Default | Description |
 | --- | --- | --- |
 | `labelWidthDots` | `600` | Label width in dots (3 in @ 200 DPI ≈ 600). |
-| `labelHeightDots` | `250` | Label height in dots. |
+| `labelHeightDots` | `240` | Label height in dots. |
 | `useSmoothScaling` | `true` | Anti-aliased resize when fitting the image. |
 
 ### `PrintResult`
@@ -94,18 +97,32 @@ required Android setup.
 | Member | Type | Description |
 | --- | --- | --- |
 | `isSuccess` | `bool` | `true` when the job was sent successfully. |
-| `errorCode` | `String?` | Native error code (see below). |
-| `errorMessage` | `String?` | Human-readable failure detail. |
+| `errorCode` | `PrintErrorCode?` | Typed error code (see below). |
+| `userMessage` | `String?` | Stable message for UI (`errorCode.userMessage`). |
+| `errorMessage` | `String?` | Technical detail from the native layer (logs). |
+| `rawErrorCode` | `String?` | Original native string code. |
 
-## Error codes
+## Error codes (`PrintErrorCode`)
 
-| Code | Meaning |
-| --- | --- |
-| `INVALID_ARGS` | A required argument was missing. |
-| `PRINT_ERROR` | Connection or printing failed (see message). |
-| `NO_ACTIVITY` | Permission request made without a foreground Activity. |
-| `PERMISSION_REQUEST_IN_PROGRESS` | A previous permission request hasn't resolved yet. |
-| `UNSUPPORTED_PLATFORM` | Called on iOS. |
+| Enum | Native code | User message (ES) |
+| --- | --- | --- |
+| `invalidArgs` | `INVALID_ARGS` | Revisa los datos enviados a la impresora. |
+| `permissionDenied` | `PERMISSION_DENIED` | Se requieren permisos de Bluetooth… |
+| `printError` | `PRINT_ERROR` | No se pudo imprimir. Verifica que la impresora… |
+| `connectError` | `CONNECT_ERROR` | No se pudo conectar con la impresora… |
+| `calibrateError` | `CALIBRATE_ERROR` | No se pudo calibrar la impresora… |
+| `disconnectError` | `DISCONNECT_ERROR` | No se pudo cerrar la conexión… |
+| `noActivity` | `NO_ACTIVITY` | No hay una pantalla activa… |
+| `permissionRequestInProgress` | `PERMISSION_REQUEST_IN_PROGRESS` | Ya hay una solicitud de permisos… |
+| `unsupportedPlatform` | `UNSUPPORTED_PLATFORM` | La impresión solo está disponible en Android. |
+| `paperOut` | `PAPER_OUT` | La impresora se quedó sin papel. Recarga el rollo… |
+| `printTimeout` | `PRINT_TIMEOUT` | La impresora no confirmó el fin de la impresión a tiempo… |
+| `unknown` | `UNKNOWN` | Ocurrió un error al imprimir… |
+
+Unknown native codes map to `PrintErrorCode.unknown`; the original string is kept in `rawErrorCode`.
+
+Print success means the batch finished processing on the printer (end-of-batch
+status poll after `write`×N), not only that bytes were queued.
 
 ## Example
 

@@ -56,8 +56,62 @@ void main() {
     );
 
     expect(result.isSuccess, isFalse);
-    expect(result.errorCode, 'PRINT_ERROR');
+    expect(result.errorCode, PrintErrorCode.printError);
     expect(result.errorMessage, 'printer offline');
+    expect(result.userMessage, PrintErrorCode.printError.userMessage);
+    expect(result.rawErrorCode, 'PRINT_ERROR');
+  });
+
+  test('unknown PlatformException code maps to PrintErrorCode.unknown', () async {
+    mockHandler((_) async => throw PlatformException(
+          code: 'SOMETHING_NEW',
+          message: 'future native error',
+        ));
+
+    final result = await platform.printImageBluetooth(
+      mac: 'AA:BB:CC:DD:EE:FF',
+      imageBase64: 'AAAA',
+    );
+
+    expect(result.isSuccess, isFalse);
+    expect(result.errorCode, PrintErrorCode.unknown);
+    expect(result.rawErrorCode, 'SOMETHING_NEW');
+    expect(result.userMessage, PrintErrorCode.unknown.userMessage);
+  });
+
+  test('PAPER_OUT PlatformException maps to PrintErrorCode.paperOut', () async {
+    mockHandler((_) async => throw PlatformException(
+          code: 'PAPER_OUT',
+          message: 'La impresora reporta sin papel (isPaperOut)',
+        ));
+
+    final result = await platform.printImageBluetooth(
+      mac: 'AA:BB:CC:DD:EE:FF',
+      imageBase64: 'AAAA',
+    );
+
+    expect(result.isSuccess, isFalse);
+    expect(result.errorCode, PrintErrorCode.paperOut);
+    expect(result.rawErrorCode, 'PAPER_OUT');
+    expect(result.userMessage, PrintErrorCode.paperOut.userMessage);
+  });
+
+  test('PRINT_TIMEOUT PlatformException maps to PrintErrorCode.printTimeout',
+      () async {
+    mockHandler((_) async => throw PlatformException(
+          code: 'PRINT_TIMEOUT',
+          message: 'Timeout esperando fin de lote',
+        ));
+
+    final result = await platform.printImageBluetooth(
+      mac: 'AA:BB:CC:DD:EE:FF',
+      imageBase64: 'AAAA',
+    );
+
+    expect(result.isSuccess, isFalse);
+    expect(result.errorCode, PrintErrorCode.printTimeout);
+    expect(result.rawErrorCode, 'PRINT_TIMEOUT');
+    expect(result.userMessage, PrintErrorCode.printTimeout.userMessage);
   });
 
   test('isBluetoothEnabled returns false when the platform throws', () async {

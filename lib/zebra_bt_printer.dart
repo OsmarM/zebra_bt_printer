@@ -1,5 +1,6 @@
 library zebra_bt_printer;
 
+export 'src/models/print_error_code.dart';
 export 'src/models/print_result.dart';
 export 'src/models/printer_config.dart';
 export 'zebra_bt_printer_platform_interface.dart'
@@ -17,7 +18,7 @@ import 'zebra_bt_printer_platform_interface.dart';
 ///   mac: '48:A4:93:DB:04:6F',
 ///   imageBase64: myBase64String,
 /// );
-/// if (result.isSuccess) { ... }
+/// if (result.isSuccess) { ... } else { show(result.userMessage); }
 /// ```
 class ZebraBtPrinter {
   ZebraBtPrinter._();
@@ -28,6 +29,9 @@ class ZebraBtPrinter {
   /// [imageBase64] : Imagen en formato base64 (JPG o PNG).
   /// [config] : Configuración de etiqueta. Por defecto 600×240 dots, Zebra.
   /// [copies] : Número de copias a imprimir en una sola conexión BT (default 1).
+  ///
+  /// Tras enviar las copias, espera a que la impresora confirme el fin del lote
+  /// (status). El éxito no significa solo “encolado”, sino lote procesado.
   ///
   /// Pasar [copies] > 1 es mucho más eficiente que llamar este método
   /// varias veces, ya que la conexión Bluetooth se abre y cierra una sola vez.

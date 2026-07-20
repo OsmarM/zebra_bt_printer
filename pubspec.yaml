@@ -1,6 +1,6 @@
 name: zebra_bt_printer
 description: "Flutter plugin for Zebra and Honeywell portable Bluetooth printer integration via Bluetooth or TCP/IP."
-version: 1.4.0
+version: 1.5.0
 homepage:
 
 environment:

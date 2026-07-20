@@ -15,9 +15,15 @@ class MockZebraBtPrinterPlatform
     required String mac,
     required String imageBase64,
     PrinterConfig config = const PrinterConfig(),
+    int copies = 1,
   }) async {
     lastMethod = 'printImageBluetooth';
-    lastArgs = {'mac': mac, 'imageBase64': imageBase64, 'config': config};
+    lastArgs = {
+      'mac': mac,
+      'imageBase64': imageBase64,
+      'config': config,
+      'copies': copies,
+    };
     return const PrintResult.success();
   }
 
@@ -29,7 +35,11 @@ class MockZebraBtPrinterPlatform
   }) async {
     lastMethod = 'printImageIP';
     lastArgs = {'ip': ip, 'imageBase64': imageBase64, 'config': config};
-    return PrintResult.failure(errorMessage: 'boom', errorCode: 'PRINT_ERROR');
+    return const PrintResult.failure(
+      errorCode: PrintErrorCode.printError,
+      errorMessage: 'boom',
+      rawErrorCode: 'PRINT_ERROR',
+    );
   }
 
   @override
@@ -47,6 +57,15 @@ class MockZebraBtPrinterPlatform
 
   @override
   Future<bool> isBluetoothEnabled() async => true;
+
+  @override
+  Future<bool> connectBluetooth({required String mac}) async => true;
+
+  @override
+  Future<bool> disconnectBluetooth({required String mac}) async => true;
+
+  @override
+  Future<bool> calibratePrinter({required String mac}) async => true;
 }
 
 void main() {
@@ -83,13 +102,49 @@ void main() {
       );
 
       expect(result.isSuccess, isFalse);
-      expect(result.errorCode, 'PRINT_ERROR');
+      expect(result.errorCode, PrintErrorCode.printError);
       expect(result.errorMessage, 'boom');
+      expect(result.userMessage, PrintErrorCode.printError.userMessage);
+      expect(result.rawErrorCode, 'PRINT_ERROR');
     });
 
     test('requestPermissions / isBluetoothEnabled delegate', () async {
       expect(await ZebraBtPrinter.requestPermissions(), isTrue);
       expect(await ZebraBtPrinter.isBluetoothEnabled(), isTrue);
+    });
+  });
+
+  group('PrintErrorCode', () {
+    test('fromNative maps known codes', () {
+      expect(
+        PrintErrorCode.fromNative('PRINT_ERROR'),
+        PrintErrorCode.printError,
+      );
+      expect(
+        PrintErrorCode.fromNative('PERMISSION_DENIED'),
+        PrintErrorCode.permissionDenied,
+      );
+      expect(
+        PrintErrorCode.fromNative('PAPER_OUT'),
+        PrintErrorCode.paperOut,
+      );
+      expect(
+        PrintErrorCode.fromNative('PRINT_TIMEOUT'),
+        PrintErrorCode.printTimeout,
+      );
+    });
+
+    test('fromNative maps unknown / null to unknown', () {
+      expect(PrintErrorCode.fromNative(null), PrintErrorCode.unknown);
+      expect(PrintErrorCode.fromNative(''), PrintErrorCode.unknown);
+      expect(PrintErrorCode.fromNative('FOO'), PrintErrorCode.unknown);
+    });
+
+    test('userMessage is stable and non-empty', () {
+      for (final code in PrintErrorCode.values) {
+        expect(code.userMessage, isNotEmpty);
+        expect(code.nativeCode, isNotEmpty);
+      }
     });
   });
 
@@ -99,7 +154,7 @@ void main() {
       final map = config.toMap();
 
       expect(map['labelWidthDots'], 600);
-      expect(map['labelHeightDots'], 250);
+      expect(map['labelHeightDots'], 240);
       expect(map['useSmoothScaling'], true);
     });
 

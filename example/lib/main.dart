@@ -50,7 +50,7 @@ class _PrinterDemoPageState extends State<PrinterDemoPage> {
       _busy = false;
       _status = result.isSuccess
           ? '$label: OK'
-          : '$label: ${result.errorCode} – ${result.errorMessage}';
+          : '$label: ${result.userMessage}';
     });
   }
 

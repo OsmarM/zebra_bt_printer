@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'src/models/print_error_code.dart';
 import 'src/models/print_result.dart';
 import 'src/models/printer_config.dart';
 import 'zebra_bt_printer_platform_interface.dart';
@@ -8,6 +9,14 @@ import 'zebra_bt_printer_platform_interface.dart';
 class MethodChannelZebraBtPrinter extends ZebraBtPrinterPlatform {
   @visibleForTesting
   final methodChannel = const MethodChannel('zebra_bt_printer');
+
+  PrintResult _failureFrom(PlatformException e) {
+    return PrintResult.failure(
+      errorCode: PrintErrorCode.fromNative(e.code),
+      errorMessage: e.message ?? 'Error desconocido',
+      rawErrorCode: e.code,
+    );
+  }
 
   @override
   Future<PrintResult> printImageBluetooth({
@@ -25,10 +34,7 @@ class MethodChannelZebraBtPrinter extends ZebraBtPrinterPlatform {
       });
       return const PrintResult.success();
     } on PlatformException catch (e) {
-      return PrintResult.failure(
-        errorMessage: e.message ?? 'Error desconocido',
-        errorCode: e.code,
-      );
+      return _failureFrom(e);
     }
   }
 
@@ -46,10 +52,7 @@ class MethodChannelZebraBtPrinter extends ZebraBtPrinterPlatform {
       });
       return const PrintResult.success();
     } on PlatformException catch (e) {
-      return PrintResult.failure(
-        errorMessage: e.message ?? 'Error desconocido',
-        errorCode: e.code,
-      );
+      return _failureFrom(e);
     }
   }
 
@@ -65,10 +68,7 @@ class MethodChannelZebraBtPrinter extends ZebraBtPrinterPlatform {
       });
       return const PrintResult.success();
     } on PlatformException catch (e) {
-      return PrintResult.failure(
-        errorMessage: e.message ?? 'Error desconocido',
-        errorCode: e.code,
-      );
+      return _failureFrom(e);
     }
   }
 
