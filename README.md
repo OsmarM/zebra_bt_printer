@@ -115,9 +115,14 @@ required Android setup.
 | `noActivity` | `NO_ACTIVITY` | No hay una pantalla activa… |
 | `permissionRequestInProgress` | `PERMISSION_REQUEST_IN_PROGRESS` | Ya hay una solicitud de permisos… |
 | `unsupportedPlatform` | `UNSUPPORTED_PLATFORM` | La impresión solo está disponible en Android. |
+| `paperOut` | `PAPER_OUT` | La impresora se quedó sin papel. Recarga el rollo… |
+| `printTimeout` | `PRINT_TIMEOUT` | La impresora no confirmó el fin de la impresión a tiempo… |
 | `unknown` | `UNKNOWN` | Ocurrió un error al imprimir… |
 
 Unknown native codes map to `PrintErrorCode.unknown`; the original string is kept in `rawErrorCode`.
+
+Print success means the batch finished processing on the printer (end-of-batch
+status poll after `write`×N), not only that bytes were queued.
 
 ## Example
 

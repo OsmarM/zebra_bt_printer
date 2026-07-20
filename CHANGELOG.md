@@ -5,6 +5,12 @@
 * Added stable `userMessage` for UI and kept `errorMessage` / `rawErrorCode`
   for technical logging.
 * Unknown native codes map to `PrintErrorCode.unknown`.
+* Added `PrintErrorCode.paperOut` and a pre-print paper check via Zebra
+  `getCurrentStatus().isPaperOut` (Bluetooth image/IP/label).
+* End-of-batch confirmation: after `write`×N, poll status until the printer is
+  ready, reports paper out, or times out (`PrintErrorCode.printTimeout`).
+  Does not confirm label-by-label or report “k of N”.
+* `PAPER_OUT` and `PRINT_TIMEOUT` are not retried by the native retry loop.
 
 ## 1.0.0
 

@@ -40,6 +40,14 @@ enum PrintErrorCode {
     'UNSUPPORTED_PLATFORM',
     'La impresión solo está disponible en Android.',
   ),
+  paperOut(
+    'PAPER_OUT',
+    'La impresora se quedó sin papel. Recarga el rollo e inténtalo de nuevo.',
+  ),
+  printTimeout(
+    'PRINT_TIMEOUT',
+    'La impresora no confirmó el fin de la impresión a tiempo. Verifica el rollo y el estado del equipo.',
+  ),
   unknown(
     'UNKNOWN',
     'Ocurrió un error al imprimir. Inténtalo de nuevo.',

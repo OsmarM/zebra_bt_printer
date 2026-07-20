@@ -16,6 +16,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 import com.zebra.sdk.comm.BluetoothConnection
+import com.zebra.sdk.comm.Connection
 import com.zebra.sdk.comm.TcpConnection
 import com.zebra.sdk.graphics.internal.ZebraImageAndroid
 import com.zebra.sdk.printer.ZebraPrinterFactory
@@ -47,6 +48,12 @@ class ZebraBtPrinterPlugin :
     // está ocupada con otro dispositivo.
     private val MAX_RETRIES    = 3
     private val RETRY_DELAY_MS = 1500L
+
+    /** Intervalo entre consultas de status al confirmar el fin del lote. */
+    private val BATCH_POLL_INTERVAL_MS = 400L
+
+    /** Tiempo mínimo tras el envío antes de aceptar "listo" (evita falso éxito). */
+    private val BATCH_MIN_SETTLE_MS = 500L
 
     // Conexiones BT persistentes, indexadas por MAC.
     // Permiten reutilizar la misma sesión SPP entre impresiones consecutivas
@@ -195,7 +202,7 @@ class ZebraBtPrinterPlugin :
                 withRetry(MAX_RETRIES) { printImageViaBluetooth(mac, imageBase64, config, copies) }
                 runOnUiThread(result) { it.success(true) }
             } catch (e: Exception) {
-                runOnUiThread(result) { it.error("PRINT_ERROR", e.message, null) }
+                reportPrintFailure(result, e)
             }
         }
     }
@@ -210,7 +217,7 @@ class ZebraBtPrinterPlugin :
                 printImageViaTCP(ip, imageBase64, config)
                 runOnUiThread(result) { it.success(true) }
             } catch (e: Exception) {
-                runOnUiThread(result) { it.error("PRINT_ERROR", e.message, null) }
+                reportPrintFailure(result, e)
             }
         }
     }
@@ -233,7 +240,7 @@ class ZebraBtPrinterPlugin :
                 withRetry(MAX_RETRIES) { printZplViaBluetooth(mac, zplText) }
                 runOnUiThread(result) { it.success(true) }
             } catch (e: Exception) {
-                runOnUiThread(result) { it.error("PRINT_ERROR", e.message, null) }
+                reportPrintFailure(result, e)
             }
         }
     }
@@ -352,6 +359,8 @@ class ZebraBtPrinterPlugin :
         val closeable = persistent == null
 
         try {
+            ensurePaperLoaded(conn)
+
             val source      = decodeBase64ToBitmap(imageBase64)
             val labelBitmap = createLabelBitmap(
                 source, config.labelWidthDots, config.labelHeightDots,
@@ -377,6 +386,7 @@ class ZebraBtPrinterPlugin :
             repeat(copies) {
                 conn.write(zplBytes)
             }
+            awaitBatchSettled(conn, copies)
         } catch (e: Exception) {
             if (!closeable) {
                 synchronized(persistentConnections) { persistentConnections.remove(mac) }
@@ -393,6 +403,8 @@ class ZebraBtPrinterPlugin :
         conn.open()
 
         try {
+            ensurePaperLoaded(conn)
+
             val source      = decodeBase64ToBitmap(imageBase64)
             val labelBitmap = createLabelBitmap(
                 source, config.labelWidthDots, config.labelHeightDots,
@@ -410,6 +422,7 @@ class ZebraBtPrinterPlugin :
                 append("\n^XZ")
             }
             conn.write(zpl.toByteArray(Charsets.UTF_8))
+            awaitBatchSettled(conn, copies = 1)
         } finally {
             safeClose(conn)
         }
@@ -421,10 +434,74 @@ class ZebraBtPrinterPlugin :
         val conn = BluetoothConnection(mac)
         conn.open()
         try {
+            ensurePaperLoaded(conn)
             val printer = ZebraPrinterFactory.getInstance(conn)
             printer.sendCommand("^XA^FO50,50^ADN,36,20^FD$zplText^FS^XZ")
+            awaitBatchSettled(conn, copies = 1)
         } finally {
             safeClose(conn)
+        }
+    }
+
+    /**
+     * Consulta el estado de la impresora y falla si reporta sin papel.
+     *
+     * Se usa antes de enviar ZPL. En algunas móviles, si la impresora ya está
+     * en error, [getCurrentStatus] puede lanzar ConnectionException en lugar de
+     * devolver isPaperOut=true — eso se propaga como PRINT_ERROR.
+     */
+    private fun ensurePaperLoaded(conn: Connection) {
+        val status = ZebraPrinterFactory.getInstance(conn).currentStatus
+        if (status.isPaperOut) {
+            throw PaperOutException("La impresora reporta sin papel (isPaperOut)")
+        }
+    }
+
+    /**
+     * Espera a que el lote encolado termine de procesarse (confirmación al final).
+     *
+     * No confirma etiqueta por etiqueta: tras [write]×N hace poll de status hasta
+     * que la impresora esté lista, reporte sin papel, o expire el deadline.
+     *
+     * Deadline: min(120s, 8s + copies × 4s).
+     *
+     * Evita falso éxito inmediato: solo acepta "listo" si ya se vio la impresora
+     * ocupada, o si transcurrió al menos [BATCH_MIN_SETTLE_MS].
+     */
+    private fun awaitBatchSettled(conn: Connection, copies: Int) {
+        val deadlineMs = minOf(120_000L, 8_000L + copies.toLong() * 4_000L)
+        val startedAt = System.currentTimeMillis()
+        val deadlineAt = startedAt + deadlineMs
+        val printer = ZebraPrinterFactory.getInstance(conn)
+        var sawBusy = false
+
+        while (true) {
+            val status = printer.currentStatus
+            if (status.isPaperOut) {
+                throw PaperOutException("La impresora reporta sin papel tras enviar el lote (isPaperOut)")
+            }
+
+            val bufferEmpty = status.numberOfFormatsInReceiveBuffer <= 0
+            val batchEmpty = status.labelsRemainingInBatch <= 0
+            val idle = status.isReadyToPrint && bufferEmpty && batchEmpty
+
+            if (!idle) {
+                sawBusy = true
+            } else {
+                val elapsed = System.currentTimeMillis() - startedAt
+                if (sawBusy || elapsed >= BATCH_MIN_SETTLE_MS) {
+                    return
+                }
+            }
+
+            if (System.currentTimeMillis() >= deadlineAt) {
+                throw PrintTimeoutException(
+                    "Timeout esperando fin de lote (${deadlineMs}ms, copies=$copies, " +
+                        "ready=${status.isReadyToPrint}, buffer=${status.numberOfFormatsInReceiveBuffer}, " +
+                        "remaining=${status.labelsRemainingInBatch})",
+                )
+            }
+            Thread.sleep(BATCH_POLL_INTERVAL_MS)
         }
     }
 
@@ -570,8 +647,20 @@ class ZebraBtPrinterPlugin :
      * Cierra la conexión sin lanzar excepción si ya estaba cerrada.
      * Evita que un error en close() enmascare el error original de impresión.
      */
-    private fun safeClose(conn: com.zebra.sdk.comm.Connection) {
+    private fun safeClose(conn: Connection) {
         try { conn.close() } catch (_: Exception) {}
+    }
+
+    /**
+     * Mapea fallos de impresión al código Flutter correspondiente.
+     */
+    private fun reportPrintFailure(result: Result, e: Exception) {
+        val code = when (e) {
+            is PaperOutException -> "PAPER_OUT"
+            is PrintTimeoutException -> "PRINT_TIMEOUT"
+            else -> "PRINT_ERROR"
+        }
+        runOnUiThread(result) { it.error(code, e.message, null) }
     }
 
     /**
@@ -580,6 +669,8 @@ class ZebraBtPrinterPlugin :
      *
      * Útil cuando la impresora BT está terminando la sesión de otro
      * dispositivo y necesita unos segundos antes de aceptar una nueva.
+     *
+     * No reintenta [PaperOutException] ni [PrintTimeoutException].
      */
     private fun withRetry(maxRetries: Int, block: () -> Unit) {
         var lastError: Exception? = null
@@ -587,6 +678,10 @@ class ZebraBtPrinterPlugin :
             try {
                 block()
                 return   // éxito → salir
+            } catch (e: PaperOutException) {
+                throw e
+            } catch (e: PrintTimeoutException) {
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 if (attempt < maxRetries - 1) {
@@ -596,6 +691,12 @@ class ZebraBtPrinterPlugin :
         }
         throw lastError ?: Exception("Error desconocido al imprimir")
     }
+
+    /** Señal de que la impresora reportó sin papel (pre-check o post-lote). */
+    private class PaperOutException(message: String) : Exception(message)
+
+    /** Señal de que el lote no se asentó antes del deadline. */
+    private class PrintTimeoutException(message: String) : Exception(message)
 
     // ─────────────────────────── PrintConfig ─────────────────────────────────
 

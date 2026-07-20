@@ -411,6 +411,12 @@ Future<void> printLabel(String mac, String base64Image) async {
       case PrintErrorCode.permissionDenied:
         // open Settings, etc.
         break;
+      case PrintErrorCode.paperOut:
+        // ask to reload media
+        break;
+      case PrintErrorCode.printTimeout:
+        // check printer / retry
+        break;
       case PrintErrorCode.printError:
         // retry, etc.
         break;
@@ -439,7 +445,16 @@ Use `result.userMessage` in the UI and `result.errorMessage` in logs.
 | `noActivity` | `NO_ACTIVITY` | `requestPermissions()` called with no foreground Activity. | Call from a live screen. |
 | `permissionRequestInProgress` | `PERMISSION_REQUEST_IN_PROGRESS` | A second permission request overlapped the first. | Await the first call before retrying. |
 | `unsupportedPlatform` | `UNSUPPORTED_PLATFORM` | Any call on iOS. | Gate the feature to Android. |
+| `paperOut` | `PAPER_OUT` | Printer reported out of paper in the pre-check or when confirming batch completion. | Reload media and retry. |
+| `printTimeout` | `PRINT_TIMEOUT` | The batch was sent but the printer did not confirm completion in time. | Check media/status; retry. |
 | `unknown` | *(unrecognized code)* | New or unexpected native code. | Show `userMessage`; log `rawErrorCode`. |
+
+> **Note — end-of-batch confirmation:** after sending all copies (`write`×N), the
+> plugin polls printer status until the printer is ready or fails. `isSuccess`
+> means the batch **finished processing**, not only that data was queued. There
+> is no “k of N” progress (no per-label confirmation). Deadline:
+> `min(120s, 8s + copies × 4s)`. On some mobiles already in error, the SDK may
+> fail the status query and that surfaces as `printError`.
 
 ---
 

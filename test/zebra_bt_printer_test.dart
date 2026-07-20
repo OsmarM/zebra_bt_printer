@@ -124,6 +124,14 @@ void main() {
         PrintErrorCode.fromNative('PERMISSION_DENIED'),
         PrintErrorCode.permissionDenied,
       );
+      expect(
+        PrintErrorCode.fromNative('PAPER_OUT'),
+        PrintErrorCode.paperOut,
+      );
+      expect(
+        PrintErrorCode.fromNative('PRINT_TIMEOUT'),
+        PrintErrorCode.printTimeout,
+      );
     });
 
     test('fromNative maps unknown / null to unknown', () {
